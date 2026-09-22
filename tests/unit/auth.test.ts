@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -11,7 +11,25 @@ mkdirSync(path.dirname(AUTH_FILE), { recursive: true })
 // process — tests/e2e.test.ts spawns opencode with ...process.env.
 const ORIGINAL_XDG_DATA_HOME = process.env.XDG_DATA_HOME
 const ORIGINAL_AUTH_CONTENT = process.env.OPENCODE_AUTH_CONTENT
-let loadOpenAIAuth: typeof import("../../src/auth").loadOpenAIAuth
+async function loadOpenAIAuth() {
+  // Isolate xdg-basedir's import-time environment from other plugin tests.
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      'import { loadOpenAIAuth } from "./src/auth"; console.log(JSON.stringify(await loadOpenAIAuth() ?? null))',
+    ],
+    {
+      cwd: path.resolve(import.meta.dir, "../.."),
+      env: { ...process.env, XDG_DATA_HOME: XDG },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const output = await new Response(child.stdout).text()
+  expect(await child.exited).toBe(0)
+  return JSON.parse(output) ?? undefined
+}
 
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
@@ -21,16 +39,10 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 }
 
-beforeAll(async () => {
-  // xdg-basedir captures XDG_DATA_HOME at import, so point it at the temp dir before
-  // importing the module under test (which transitively imports xdg-basedir).
-  process.env.XDG_DATA_HOME = XDG
-  loadOpenAIAuth = (await import("../../src/auth")).loadOpenAIAuth
-})
-
 afterAll(() => {
   restoreEnv("XDG_DATA_HOME", ORIGINAL_XDG_DATA_HOME)
   restoreEnv("OPENCODE_AUTH_CONTENT", ORIGINAL_AUTH_CONTENT)
+  rmSync(XDG, { recursive: true, force: true })
 })
 
 function writeAuthFile(content: string): void {

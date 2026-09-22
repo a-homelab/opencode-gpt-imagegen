@@ -21,7 +21,20 @@
 
 ## Installation
 
-Add this plugin to your [OpenCode config](https://opencode.ai/docs/plugins/). For example, in `opencode.json`:
+For this fork's installation and maintenance workflow, see [FORK.md](./FORK.md).
+
+Add this plugin to your [OpenCode config](https://opencode.ai/docs/plugins/). The package ships one entrypoint per plugin API, so the same install works on both OpenCode v2 and v1:
+
+OpenCode v2 (`opencode.json` / `opencode.jsonc`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-gpt-imagegen"]
+}
+```
+
+OpenCode v1:
 
 ```json
 {
@@ -30,7 +43,7 @@ Add this plugin to your [OpenCode config](https://opencode.ai/docs/plugins/). Fo
 }
 ```
 
-OpenCode auto-installs the package via Bun on next launch — no separate `npm install` step is needed. The plugin requires OpenCode to be authenticated with ChatGPT.
+OpenCode auto-installs the package via Bun on next launch — no separate `npm install` step is needed. The plugin requires OpenCode to be authenticated with ChatGPT. Object entrypoints on v1 require OpenCode 1.18.29 or newer.
 
 ## Usage
 
@@ -72,7 +85,11 @@ Pass any number of image paths via the `images` argument and the model uses them
 
 ## How it works
 
-OpenCode already talks to the OpenAI Codex backend to power ChatGPT subscription chat. This plugin reuses that same endpoint, attaching the hosted `image_generation` tool to a single-turn request, then writes the returned PNG to disk. Auth is read from OpenCode's standard `auth.json`; no new credential surface is introduced.
+OpenCode already talks to the OpenAI Codex backend to power ChatGPT subscription chat. This plugin reuses that same endpoint, attaching the hosted `image_generation` tool to a single-turn request, then writes the returned PNG to disk.
+
+On v2, each invocation resolves the active OpenAI connection through OpenCode's integration API. OpenCode owns credential storage and token refresh. The plugin accepts ChatGPT browser or headless OAuth connections and reads the account ID from the resolved credential's metadata. It does not read or write the credential database, copy tokens into plugin storage, or fall back to legacy credentials when the active connection is missing or unusable. Select a ChatGPT connection in OpenCode before using the tool; API-key connections are not supported yet.
+
+On v1, authentication still uses `OPENCODE_AUTH_CONTENT`, then OpenCode's standard `auth.json`. Relative image paths use the calling session's directory on both versions. Cancellation is forwarded when the host supplies a signal (including v2.0.14).
 
 ## Disclaimer
 

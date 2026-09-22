@@ -1,10 +1,34 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
+import type { Plugin } from "@opencode/plugin"
 import { xdgData } from "xdg-basedir"
 import type { OpenAIAuth } from "./types"
 
-// Mirrors OpenCode's auth resolution: OPENCODE_AUTH_CONTENT overrides $XDG_DATA_HOME/opencode/auth.json.
-// The Auth service is not exposed to external plugins, so this reproduces the rules directly.
+export async function loadV2OpenAIAuth(
+  connection: Plugin.Context["integration"]["connection"],
+): Promise<OpenAIAuth | undefined> {
+  const active = await connection.active("openai")
+  if (!active) return undefined
+
+  // OpenCode owns credential selection, refresh, and persistence in v2.
+  const value = await connection.resolve(active)
+  if (
+    value?.type !== "oauth" ||
+    (value.methodID !== "chatgpt-browser" && value.methodID !== "chatgpt-headless") ||
+    !value.access ||
+    value.expires <= Date.now()
+  ) {
+    return undefined
+  }
+  const accountId = value.metadata?.accountID
+  return {
+    type: "oauth",
+    access: value.access,
+    ...(typeof accountId === "string" && accountId ? { accountId } : {}),
+  }
+}
+
+// OpenCode v1 does not expose auth reads to plugins; its environment override takes precedence over auth.json.
 async function loadAuthData(): Promise<Record<string, unknown>> {
   if (process.env.OPENCODE_AUTH_CONTENT) {
     return JSON.parse(process.env.OPENCODE_AUTH_CONTENT) as Record<string, unknown>
