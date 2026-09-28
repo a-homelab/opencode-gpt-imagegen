@@ -1,8 +1,8 @@
 import type { Hooks, Plugin, PluginInput, PluginModule } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import { loadOpenAIAuth } from "./auth"
-import { generateImage } from "./generate"
-import { FIELD_DESCRIPTIONS, TOOL_DESCRIPTION } from "./tool-spec"
+import { generateImage, imageModelMetadata } from "./generate"
+import { FIELD_DESCRIPTIONS, IMAGE_MODELS, TOOL_DESCRIPTION } from "./tool-spec"
 import { setupV2, V2_PLUGIN_ID } from "./v2"
 
 const GptImagePlugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
@@ -16,10 +16,11 @@ const GptImagePlugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
           out: tool.schema.string().describe(FIELD_DESCRIPTIONS.out),
           quality: tool.schema.enum(["low", "medium", "high", "auto"]).describe(FIELD_DESCRIPTIONS.quality),
           size: tool.schema.string().optional().describe(FIELD_DESCRIPTIONS.size),
+          model: tool.schema.enum(IMAGE_MODELS).optional().describe(FIELD_DESCRIPTIONS.model),
           images: tool.schema.array(tool.schema.string()).optional().describe(FIELD_DESCRIPTIONS.images),
         },
         async execute(args, ctx) {
-          const { message, savedPath, versioned } = await generateImage(
+          const { message, savedPath, versioned, reported } = await generateImage(
             args,
             ctx.directory,
             await loadOpenAIAuth(),
@@ -32,6 +33,7 @@ const GptImagePlugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
               out: savedPath,
               versioned,
               billing: "subscription",
+              ...imageModelMetadata(args.model, reported),
             },
           }
         },

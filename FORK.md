@@ -13,8 +13,10 @@ live in `src/generate.ts` and `src/tool-spec.ts`; API-specific wiring stays in
 `src/index.ts` and `src/v2.ts`.
 
 The additions beyond that PR are host-managed v2 credentials, official v2 type
-checking, session-relative paths, and cancellation checks before requests and
-output writes. `@opencode/plugin` is an exact development dependency with only
+checking, session-relative paths, cancellation checks before requests and output
+writes, and the optional `model` argument selecting the hosted image model
+(`gpt-image-2.5-sunburst` down to `gpt-image-1-mini`), reported back in the tool
+result metadata. `@opencode/plugin` is an exact development dependency with only
 type imports, so it adds no v2 runtime dependency to v1 installations. Legacy
 auth behavior remains confined to the v1 entrypoint.
 

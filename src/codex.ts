@@ -1,21 +1,51 @@
 import { EventSourceParserStream } from "eventsource-parser/stream"
-import type { GenerateArgs, OpenAIAuth } from "./types"
+import type { GenerateArgs, OpenAIAuth, ReportedImageFields } from "./types"
 
 // Codex OAuth responses endpoint URL.
 // https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/model-provider-info/src/lib.rs#L37
 // https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/core/src/client.rs#L146
 const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
-// Codex model slug used for the hosted image_generation turn.
+// Codex model slug that hosts the image_generation turn. This is the chat model driving the
+// conversation, not the image model; callers choose the image model via GenerateArgs.model.
 // https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/models-manager/models.json#L24
 const SUBSCRIPTION_MODEL = "gpt-5.5"
 
-type CodexSSEEvent = {
+type CodexImageItem = {
   type?: string
-  item?: { type?: string; result?: string }
+  result?: string
+  revised_prompt?: string
+  size?: string
+  quality?: string
+  model?: string
 }
 
-export async function parseImageGenerationResultFromSSE(stream: ReadableStream<Uint8Array>): Promise<string> {
+type CodexSSEEvent = {
+  type?: string
+  item?: CodexImageItem
+}
+
+export type ImageGenerationResult = {
+  base64: string
+  reported: ReportedImageFields
+}
+
+// Pick up whichever descriptive fields the backend chose to report. Any field may be missing
+// or the wrong type on a given backend, so each is copied only when it is a non-empty string.
+function readReportedFields(item: CodexImageItem): ReportedImageFields {
+  const reported: ReportedImageFields = {}
+  if (typeof item.revised_prompt === "string" && item.revised_prompt.length > 0) {
+    reported.revisedPrompt = item.revised_prompt
+  }
+  if (typeof item.size === "string" && item.size.length > 0) reported.size = item.size
+  if (typeof item.quality === "string" && item.quality.length > 0) reported.quality = item.quality
+  if (typeof item.model === "string" && item.model.length > 0) reported.model = item.model
+  return reported
+}
+
+export async function parseImageGenerationResultFromSSE(
+  stream: ReadableStream<Uint8Array>,
+): Promise<ImageGenerationResult> {
   const events = (stream as unknown as ReadableStream<BufferSource>)
     .pipeThrough(new TextDecoderStream())
     .pipeThrough(new EventSourceParserStream())
@@ -30,7 +60,7 @@ export async function parseImageGenerationResultFromSSE(stream: ReadableStream<U
         // Reject an empty result: decoding it would write a 0-byte file and report success.
         json.item.result.length > 0
       ) {
-        return json.item.result
+        return { base64: json.item.result, reported: readReportedFields(json.item) }
       }
     } catch {
       // SSE keepalive or non-JSON heartbeat
@@ -44,7 +74,7 @@ export async function callViaCodexResponses(
   args: GenerateArgs,
   inputImageDataUrls: string[],
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ImageGenerationResult> {
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: args.prompt }]
   for (const dataUrl of inputImageDataUrls) {
     userContent.push({ type: "input_image", image_url: dataUrl })
@@ -64,6 +94,8 @@ export async function callViaCodexResponses(
         output_format: "png",
         quality: args.quality,
         ...(args.size ? { size: args.size } : {}),
+        // Omitted when unset so the backend keeps choosing its own default image model.
+        ...(args.model ? { model: args.model } : {}),
       },
     ],
     tool_choice: { type: "image_generation" },

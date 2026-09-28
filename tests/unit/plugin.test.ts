@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import type { Credential, Plugin } from "@opencode/plugin"
 import plugin from "../../src/index"
-import { TOOL_DESCRIPTION, TOOL_INPUT_SCHEMA } from "../../src/tool-spec"
+import { IMAGE_MODELS, TOOL_DESCRIPTION, TOOL_INPUT_SCHEMA } from "../../src/tool-spec"
 import { PNG_BASE64, PNG_BUFFER } from "./fixtures"
 
 type Tool = Awaited<ReturnType<Plugin.Context["tool"]["list"]>>[number]
@@ -75,6 +75,21 @@ function stubFetch() {
     async (_url: string, _init: RequestInit) =>
       new Response(
         `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "image_generation_call", result: PNG_BASE64 } })}\n\n`,
+      ),
+  )
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+  return fetchMock
+}
+
+// Like stubFetch, but the image item also carries the descriptive fields a backend may report.
+function stubFetchReporting(reported: Record<string, unknown>) {
+  const fetchMock = mock(
+    async (_url: string, _init: RequestInit) =>
+      new Response(
+        `data: ${JSON.stringify({
+          type: "response.output_item.done",
+          item: { type: "image_generation_call", result: PNG_BASE64, ...reported },
+        })}\n\n`,
       ),
   )
   globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -211,5 +226,77 @@ describe("gpt_imagegen v2", () => {
     await expect(tool.execute(args, context(AbortSignal.abort()))).rejects.toThrow()
     expect(auth.active).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("image model argument", () => {
+  test("both schemas offer the same image models and reject an unknown value", async () => {
+    const hooks = await plugin.server({} as never)
+    // The registered arg is typed as the abstract zod base; narrow it to reach safeParse.
+    const zodModel = hooks.tool?.gpt_imagegen.args.model as unknown as {
+      safeParse: (value: unknown) => { success: boolean }
+    }
+    expect(TOOL_INPUT_SCHEMA.properties.model.enum).toEqual(IMAGE_MODELS)
+    expect(TOOL_INPUT_SCHEMA.additionalProperties).toBe(false)
+
+    for (const model of IMAGE_MODELS) {
+      expect(zodModel.safeParse(model).success).toBe(true)
+    }
+    // An unknown or stale model must be refused before a request is made.
+    expect(zodModel.safeParse("gpt-image-9-ultra").success).toBe(false)
+    expect(zodModel.safeParse("gpt-5.5").success).toBe(false)
+    // The argument stays optional so existing callers keep working.
+    expect(zodModel.safeParse(undefined).success).toBe(true)
+    expect(TOOL_INPUT_SCHEMA.required).not.toContain("model")
+  })
+
+  test("v2 reports the requested model and the backend's reported fields in metadata", async () => {
+    const fetchMock = stubFetchReporting({
+      revised_prompt: "a fluffy cat",
+      size: "1024x1536",
+      quality: "high",
+      model: "gpt-image-2.5-sunburst",
+    })
+    const { tool } = await registerV2Tool(await tempDir())
+    const result = await tool.execute({ ...args, model: "gpt-image-2.5-sunburst" }, context())
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.tools[0].model).toBe("gpt-image-2.5-sunburst")
+    expect(result.metadata).toMatchObject({
+      imageModel: "gpt-image-2.5-sunburst",
+      reportedImageModel: "gpt-image-2.5-sunburst",
+      reportedSize: "1024x1536",
+      reportedQuality: "high",
+      revisedPrompt: "a fluffy cat",
+    })
+  })
+
+  test("v1 reports the requested model in metadata", async () => {
+    process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({ openai: { type: "oauth", access: "legacy" } })
+    const fetchMock = stubFetchReporting({ model: "gpt-image-2.5-flare" })
+    const hooks = await plugin.server({} as never)
+    const result = await hooks.tool?.gpt_imagegen.execute({ ...args, model: "gpt-image-2.5-flare" }, {
+      directory: await tempDir(),
+    } as never)
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0].model).toBe("gpt-image-2.5-flare")
+    expect(result as { metadata: Record<string, unknown> }).toHaveProperty("metadata")
+    expect((result as { metadata: Record<string, unknown> }).metadata).toMatchObject({
+      imageModel: "gpt-image-2.5-flare",
+      reportedImageModel: "gpt-image-2.5-flare",
+    })
+  })
+
+  test("omits the model metadata when no model is requested and none is reported", async () => {
+    const fetchMock = stubFetch()
+    const { tool } = await registerV2Tool(await tempDir())
+    const result = await tool.execute(args, context())
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0]).not.toHaveProperty("model")
+    expect(result.metadata).toEqual({
+      out: expect.any(String),
+      versioned: false,
+      billing: "subscription",
+    })
   })
 })

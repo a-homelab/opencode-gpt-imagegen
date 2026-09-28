@@ -75,6 +75,25 @@ Pass any number of image paths via the `images` argument and the model uses them
 
 <p align="center"><img src="./assets/together.png" alt="Example C output: both characters composed onto an engawa" width="640" /></p>
 
+### Choosing the image model
+
+`gpt_imagegen` accepts an optional `model` argument naming the image model that renders the
+picture. This is the image model, not your own chat model. Omit it and the backend picks its
+default.
+
+| Model | Notes |
+|---|---|
+| `gpt-image-2.5-sunburst` | Flagship. Best detailed photorealism, slower. |
+| `gpt-image-2.5-flare` | Fast default. |
+| `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` | Earlier models, for reproducing previous output. |
+
+> Draw a weathered brass compass on an old sea chart, `model: gpt-image-2.5-sunburst`. Save it as `compass.png`.
+
+The tool result metadata records the requested model as `imageModel`, plus whatever the backend
+reports about the image it produced (`reportedImageModel`, `reportedSize`, `reportedQuality`,
+`revisedPrompt`). If your account cannot use the requested model, the tool fails with the
+backend's HTTP status and message rather than quietly falling back to another model.
+
 ## Roadmap
 
 | Version | Auth path | Scope | Status |
