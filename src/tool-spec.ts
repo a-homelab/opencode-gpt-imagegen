@@ -9,11 +9,25 @@ export const TOOL_DESCRIPTION = [
   "Requires OpenCode to be authenticated with ChatGPT OAuth. Returns the absolute path of the saved PNG.",
 ].join(" ")
 
+// Image models the hosted image_generation tool accepts, newest first. This is the single
+// source of truth for both the zod enum and the JSON Schema enum.
+// https://developers.openai.com/api/docs/guides/image-generation
+export const IMAGE_MODELS = [
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare",
+  "gpt-image-2",
+  "gpt-image-1.5",
+  "gpt-image-1",
+  "gpt-image-1-mini",
+] as const
+
 export const FIELD_DESCRIPTIONS = {
   prompt: "Description of the image to generate.",
   out: "Output file path, relative to the project directory unless absolute. The plugin writes a PNG.",
   quality: "Generation quality passed to the hosted image_generation tool.",
   size: "Optional image size passed to the hosted image_generation tool. Use `auto` or `WIDTHxHEIGHT`; width and height must be multiples of 16px, max edge <= 3840px, long-to-short ratio <= 3:1, and total pixels between 655,360 and 8,294,400.",
+  model:
+    "Optional image model that renders the picture, passed to the hosted image_generation tool. This is not your own chat model. Omit it to let the backend choose. `gpt-image-2.5-sunburst` is the flagship model, best for detailed photorealism but slower; `gpt-image-2.5-flare` is the fast default. Earlier models remain available for reproducing previous output.",
   images: "Optional reference image paths, relative to the project directory unless absolute.",
 } as const
 
@@ -29,6 +43,11 @@ export const TOOL_INPUT_SCHEMA = {
       description: FIELD_DESCRIPTIONS.quality,
     },
     size: { type: "string", description: FIELD_DESCRIPTIONS.size },
+    model: {
+      type: "string",
+      enum: IMAGE_MODELS,
+      description: FIELD_DESCRIPTIONS.model,
+    },
     images: {
       type: "array",
       items: { type: "string" },

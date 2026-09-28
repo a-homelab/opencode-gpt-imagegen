@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 import { loadV2OpenAIAuth } from "./auth"
-import { generateImage } from "./generate"
+import { generateImage, imageModelMetadata } from "./generate"
 import { TOOL_DESCRIPTION, TOOL_INPUT_SCHEMA } from "./tool-spec"
 import type { GenerateArgs } from "./types"
 
@@ -16,15 +16,21 @@ export async function setupV2(ctx: Plugin.Context): Promise<void> {
         context.signal?.throwIfAborted()
         const auth = await loadV2OpenAIAuth(ctx.integration.connection)
         const session = await ctx.session.get({ sessionID: context.sessionID })
-        const { message, savedPath, versioned } = await generateImage(
-          input as GenerateArgs,
+        const args = input as GenerateArgs
+        const { message, savedPath, versioned, reported } = await generateImage(
+          args,
           session.location.directory,
           auth,
           context.signal,
         )
         return {
           content: message,
-          metadata: { out: savedPath, versioned, billing: "subscription" },
+          metadata: {
+            out: savedPath,
+            versioned,
+            billing: "subscription",
+            ...imageModelMetadata(args.model, reported),
+          },
         }
       },
     })
