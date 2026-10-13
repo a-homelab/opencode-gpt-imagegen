@@ -20,6 +20,45 @@ result metadata. `@opencode/plugin` is an exact development dependency with only
 type imports, so it adds no v2 runtime dependency to v1 installations. Legacy
 auth behavior remains confined to the v1 entrypoint.
 
+## Edit action, input fidelity and mask
+
+Upstream sends reference images only as `input_image` content and lets the hosted
+tool decide whether to draw a new picture or change one. The fork adds three
+optional arguments and maps each to a field of the hosted `image_generation` tool:
+
+| Argument | Values | Sent as |
+|---|---|---|
+| `action` | `generate`, `edit`, `auto` | `action` |
+| `inputFidelity` | `high`, `low` | `input_fidelity` |
+| `mask` | PNG path, resolved like `images` | `input_image_mask: { image_url: <PNG data URL> }` |
+
+Each field is sent only when its argument is given, so a call without them sends
+the same request as before. `action: edit` and `mask` both need at least one entry
+in `images`, because the hosted tool edits the first input image and applies the
+mask to it; the plugin refuses either without one, and refuses a mask that is not
+a PNG, before it sends a request. The enums
+are also checked at run time because the v2 host passes input through unvalidated.
+
+Field names and values come from the OpenAI documentation, checked 2026-10-13:
+
+- [Responses API reference, `image_generation` tool](https://developers.openai.com/api/reference/resources/responses/methods/create):
+  `action` is `generate`, `edit` or `auto` (default `auto`); `input_fidelity` is
+  `high` or `low`, supported as both on `gpt-image-1` and `gpt-image-1.5` and only
+  `low` on `gpt-image-1-mini`; `input_image_mask` is an object with an optional
+  `image_url` (base64-encoded mask image) or `file_id`.
+- [Image generation guide](https://developers.openai.com/api/docs/guides/image-generation):
+  the image to edit and the mask must share format and size, the mask needs an
+  alpha channel, a mask applies to the first input image, and `gpt-image-2`
+  should omit `input_fidelity` because it reads every input image at high
+  fidelity.
+- [Image generation tool guide](https://developers.openai.com/api/docs/guides/tools-image-generation):
+  set `action` to `generate` or `edit` to force that behavior.
+
+The ChatGPT Codex backend this plugin calls is not the public API. Little Acre's
+subscription research found it honors `action: edit`; `input_fidelity` and
+`input_image_mask` are passed through as documented for the public API and have
+not been verified on the subscription backend.
+
 ## Install from source
 
 The public npm package still belongs to upstream. To use this fork locally:

@@ -94,6 +94,23 @@ reports about the image it produced (`reportedImageModel`, `reportedSize`, `repo
 `revisedPrompt`). If your account cannot use the requested model, the tool fails with the
 backend's HTTP status and message rather than quietly falling back to another model.
 
+### Editing an existing image
+
+By default the backend decides from the prompt whether to draw a new picture or change a
+reference image. Three optional arguments make that explicit:
+
+| Argument | Values | Effect |
+|---|---|---|
+| `action` | `generate`, `edit`, `auto` | `edit` changes the first entry of `images`; `generate` always draws a new picture; `auto` (or omitting it) lets the backend decide. `edit` needs at least one image. |
+| `inputFidelity` | `high`, `low` | How closely the output keeps details of the reference images. Supported by `gpt-image-1` and `gpt-image-1.5` (`gpt-image-1-mini`: `low` only). Omit it for `gpt-image-2` and newer, which always use high fidelity. |
+| `mask` | PNG path | Inpainting mask for the first image: transparent pixels mark where it may change. Same size as that image, with an alpha channel. Needs at least one image. |
+
+> Edit `photo.png` with `action: edit`: replace the sky with a stormy sunset and keep everything else. Save it as `photo-storm.png`.
+
+The plugin sends each one as the hosted tool's `action`, `input_fidelity` and
+`input_image_mask` fields only when you pass it, so calls without them behave as before. See
+[FORK.md](./FORK.md#edit-action-input-fidelity-and-mask) for the API documentation these follow.
+
 ## Roadmap
 
 | Version | Auth path | Scope | Status |

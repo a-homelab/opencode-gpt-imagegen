@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { readReferenceImages } from "../../src/input-image"
+import { readMaskImage, readReferenceImages } from "../../src/input-image"
 import { pngDataUrl as dataUrl, PNG_BUFFER as PNG } from "./fixtures"
 
 let dir: string
@@ -77,5 +77,27 @@ describe("readReferenceImages", () => {
   test("rejects the whole call when any path is missing", async () => {
     await writeFile(path.join(dir, "present.png"), PNG)
     expect(readReferenceImages(["present.png", "missing.png"], dir)).rejects.toThrow()
+  })
+})
+
+describe("readMaskImage", () => {
+  test("returns undefined when no mask is given", async () => {
+    expect(await readMaskImage(undefined, dir)).toBeUndefined()
+  })
+
+  test("encodes a PNG mask as a PNG data URL, resolved against the context directory", async () => {
+    await writeFile(path.join(dir, "mask.png"), PNG)
+    expect(await readMaskImage("mask.png", dir)).toBe(dataUrl(PNG))
+    expect(await readMaskImage(path.join(dir, "mask.png"), "/some/other/ctx")).toBe(dataUrl(PNG))
+  })
+
+  test("refuses an image that is not a PNG", async () => {
+    const abs = path.join(dir, "mask.gif")
+    await writeFile(abs, Buffer.from("GIF89a"))
+    expect(readMaskImage("mask.gif", dir)).rejects.toThrow(`mask must be a PNG file: ${abs}`)
+  })
+
+  test("rejects a missing mask file", async () => {
+    expect(readMaskImage("missing.png", dir)).rejects.toThrow()
   })
 })

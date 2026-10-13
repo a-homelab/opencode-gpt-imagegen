@@ -74,6 +74,7 @@ export async function callViaCodexResponses(
   args: GenerateArgs,
   inputImageDataUrls: string[],
   signal?: AbortSignal,
+  maskDataUrl?: string,
 ): Promise<ImageGenerationResult> {
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: args.prompt }]
   for (const dataUrl of inputImageDataUrls) {
@@ -96,6 +97,12 @@ export async function callViaCodexResponses(
         ...(args.size ? { size: args.size } : {}),
         // Omitted when unset so the backend keeps choosing its own default image model.
         ...(args.model ? { model: args.model } : {}),
+        // Edit fields are sent only when given, so a call without them sends exactly the
+        // request it sent before they existed.
+        // https://developers.openai.com/api/reference/resources/responses/methods/create
+        ...(args.action ? { action: args.action } : {}),
+        ...(args.inputFidelity ? { input_fidelity: args.inputFidelity } : {}),
+        ...(maskDataUrl ? { input_image_mask: { image_url: maskDataUrl } } : {}),
       },
     ],
     tool_choice: { type: "image_generation" },

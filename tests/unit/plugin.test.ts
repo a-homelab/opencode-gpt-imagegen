@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import type { Credential, Plugin } from "@opencode/plugin"
 import plugin from "../../src/index"
-import { IMAGE_MODELS, TOOL_DESCRIPTION, TOOL_INPUT_SCHEMA } from "../../src/tool-spec"
+import { IMAGE_ACTIONS, IMAGE_MODELS, INPUT_FIDELITIES, TOOL_DESCRIPTION, TOOL_INPUT_SCHEMA } from "../../src/tool-spec"
 import { PNG_BASE64, PNG_BUFFER } from "./fixtures"
 
 type Tool = Awaited<ReturnType<Plugin.Context["tool"]["list"]>>[number]
@@ -298,5 +298,100 @@ describe("image model argument", () => {
       versioned: false,
       billing: "subscription",
     })
+  })
+})
+
+describe("edit arguments", () => {
+  type ZodLike = { safeParse: (value: unknown) => { success: boolean } }
+
+  test("both schemas offer the same optional action and inputFidelity values", async () => {
+    const hooks = await plugin.server({} as never)
+    const zodArgs = hooks.tool?.gpt_imagegen.args as unknown as Record<string, ZodLike>
+    expect(TOOL_INPUT_SCHEMA.properties.action.enum).toEqual(IMAGE_ACTIONS)
+    expect(TOOL_INPUT_SCHEMA.properties.inputFidelity.enum).toEqual(INPUT_FIDELITIES)
+    expect(TOOL_INPUT_SCHEMA.properties.mask.type).toBe("string")
+
+    for (const action of IMAGE_ACTIONS) expect(zodArgs.action.safeParse(action).success).toBe(true)
+    for (const fidelity of INPUT_FIDELITIES) expect(zodArgs.inputFidelity.safeParse(fidelity).success).toBe(true)
+    expect(zodArgs.action.safeParse("inpaint").success).toBe(false)
+    expect(zodArgs.inputFidelity.safeParse("medium").success).toBe(false)
+    for (const key of ["action", "inputFidelity", "mask"]) {
+      expect(zodArgs[key].safeParse(undefined).success).toBe(true)
+      expect(TOOL_INPUT_SCHEMA.required).not.toContain(key)
+    }
+  })
+
+  test("v2 reads the mask file and sends it with the edit fields", async () => {
+    const dir = await tempDir()
+    const mask = Buffer.concat([PNG_BUFFER, Buffer.from("mask")])
+    await writeFile(path.join(dir, "preview.png"), PNG_BUFFER)
+    await writeFile(path.join(dir, "mask.png"), mask)
+    const fetchMock = stubFetch()
+    const { tool } = await registerV2Tool(dir)
+    await tool.execute(
+      { ...args, images: ["preview.png"], action: "edit", inputFidelity: "low", mask: "mask.png" },
+      context(),
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.tools[0]).toMatchObject({
+      action: "edit",
+      input_fidelity: "low",
+      input_image_mask: { image_url: `data:image/png;base64,${mask.toString("base64")}` },
+    })
+    expect(body.input[0].content[1].image_url).toBe(`data:image/png;base64,${PNG_BASE64}`)
+  })
+
+  test("v1 sends action edit with the first reference image", async () => {
+    process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({ openai: { type: "oauth", access: "legacy" } })
+    const dir = await tempDir()
+    await writeFile(path.join(dir, "preview.png"), PNG_BUFFER)
+    const fetchMock = stubFetch()
+    const hooks = await plugin.server({} as never)
+    await hooks.tool?.gpt_imagegen.execute({ ...args, images: ["preview.png"], action: "edit" }, {
+      directory: dir,
+    } as never)
+
+    const tool = JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0]
+    expect(tool.action).toBe("edit")
+    expect(tool).not.toHaveProperty("input_fidelity")
+    expect(tool).not.toHaveProperty("input_image_mask")
+  })
+
+  test.each([
+    [{ action: "edit" }, "action edit needs the image to edit"],
+    [{ action: "edit", images: [] }, "action edit needs the image to edit"],
+    [{ mask: "mask.png" }, "mask applies to the first entry of images"],
+    [{ mask: "", images: ["preview.png"] }, "mask must be a non-empty file path"],
+    [{ action: "inpaint", images: ["preview.png"] }, "action must be one of generate, edit, auto"],
+    [{ inputFidelity: "medium" }, "inputFidelity must be one of high, low"],
+  ])("refuses %j before any request", async (extra, message) => {
+    const dir = await tempDir()
+    await writeFile(path.join(dir, "preview.png"), PNG_BUFFER)
+    const fetchMock = stubFetch()
+    const { tool } = await registerV2Tool(dir)
+    await expect(tool.execute({ ...args, ...extra }, context())).rejects.toThrow(message)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("refuses a mask that is not a PNG", async () => {
+    const dir = await tempDir()
+    await writeFile(path.join(dir, "preview.png"), PNG_BUFFER)
+    await writeFile(path.join(dir, "mask.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0]))
+    const fetchMock = stubFetch()
+    const { tool } = await registerV2Tool(dir)
+    await expect(
+      tool.execute({ ...args, images: ["preview.png"], action: "edit", mask: "mask.jpg" }, context()),
+    ).rejects.toThrow(`mask must be a PNG file: ${path.join(dir, "mask.jpg")}`)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test("an edit without a mask sends no input_image_mask", async () => {
+    const dir = await tempDir()
+    await writeFile(path.join(dir, "preview.png"), PNG_BUFFER)
+    const fetchMock = stubFetch()
+    const { tool } = await registerV2Tool(dir)
+    await tool.execute({ ...args, images: ["preview.png"], action: "edit" }, context())
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0]).not.toHaveProperty("input_image_mask")
   })
 })

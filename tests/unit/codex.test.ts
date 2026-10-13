@@ -255,3 +255,84 @@ describe("callViaCodexResponses", () => {
     expect(callViaCodexResponses(auth, args, [])).rejects.toThrow("codex responses request failed: 500 upstream boom")
   })
 })
+
+describe("callViaCodexResponses edit fields", () => {
+  const originalFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  function stub() {
+    const fetchMock = mock(async (_url: string, _init: RequestInit) => new Response(imageDoneEvent("PARSED")))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+  const auth = { type: "oauth", access: "tok" } as const
+  const reference = "data:image/png;base64,AAA"
+
+  test("sends the same request as before when no edit field is given", async () => {
+    const fetchMock = stub()
+    const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "high", size: "1024x1024" }
+    await callViaCodexResponses(auth, args, [reference])
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    // Compare the serialized form so key order is pinned too: old callers must send the same bytes.
+    expect(JSON.stringify(body.tools)).toBe(
+      JSON.stringify([{ type: "image_generation", output_format: "png", quality: "high", size: "1024x1024" }]),
+    )
+    for (const key of ["action", "input_fidelity", "input_image_mask"]) {
+      expect(body.tools[0]).not.toHaveProperty(key)
+    }
+  })
+
+  test.each(["generate", "edit", "auto"] as const)("passes action %s through unchanged", async (action) => {
+    const fetchMock = stub()
+    await callViaCodexResponses(auth, { prompt: "p", out: "o.png", quality: "auto", images: ["r.png"], action }, [
+      reference,
+    ])
+    const tool = JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0]
+    expect(tool.action).toBe(action)
+    expect(tool).not.toHaveProperty("input_fidelity")
+    expect(tool).not.toHaveProperty("input_image_mask")
+  })
+
+  test.each(["high", "low"] as const)("passes inputFidelity %s as input_fidelity", async (inputFidelity) => {
+    const fetchMock = stub()
+    await callViaCodexResponses(auth, { prompt: "p", out: "o.png", quality: "auto", inputFidelity }, [reference])
+    const tool = JSON.parse(fetchMock.mock.calls[0][1].body as string).tools[0]
+    expect(tool.input_fidelity).toBe(inputFidelity)
+    expect(tool).not.toHaveProperty("inputFidelity")
+    expect(tool).not.toHaveProperty("action")
+  })
+
+  test("sends the mask as input_image_mask.image_url and keeps the reference as input_image", async () => {
+    const fetchMock = stub()
+    const mask = "data:image/png;base64,MASK"
+    const args: GenerateArgs = {
+      prompt: "make it brick",
+      out: "o.png",
+      quality: "high",
+      images: ["r.png"],
+      mask: "mask.png",
+      action: "edit",
+      inputFidelity: "high",
+    }
+    await callViaCodexResponses(auth, args, [reference], undefined, mask)
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.tools[0]).toEqual({
+      type: "image_generation",
+      output_format: "png",
+      quality: "high",
+      action: "edit",
+      input_fidelity: "high",
+      input_image_mask: { image_url: mask },
+    })
+    // The mask path is a plugin argument, never a backend field.
+    expect(body.tools[0]).not.toHaveProperty("mask")
+    expect(body.input[0].content).toEqual([
+      { type: "input_text", text: "make it brick" },
+      { type: "input_image", image_url: reference },
+    ])
+  })
+})
